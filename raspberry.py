@@ -29,6 +29,8 @@ import logging
 import re
 import queue
 
+import traceback
+
 device = "CPU"
 model_path = "public/aclnet-int8/aclnet_des_53_int8.xml"
 label_path = "data/aclnet_53cl.txt"
@@ -39,7 +41,7 @@ mic_name = 'default'
 mic_tuning = Tuning(microphone)
 
 doa_lock = threading.Lock()
-now_angle, now_dist = 0, 0
+now_pos = {}
 
 send_lock = threading.Lock()
 app = FastAPI()
@@ -60,7 +62,7 @@ audio_lock = threading.Lock()
 now_audio = queue.Queue()
 
 def sound_classification(tcp_socket, client_socket, reg_num):
-	global doa_lock, now_angle, now_dist, audio_lock, now_audio, now_client
+	global doa_lock, now_pos, audio_lock, now_audio, now_client
 	now_client = client_socket
 	ie = IECore()
 	net = ie.read_network(model_path, model_path[:-4] + ".bin")
@@ -117,7 +119,7 @@ def sound_classification(tcp_socket, client_socket, reg_num):
 					result = json.dumps({'type': 'SoundStopped'})
 				else:
 					with doa_lock:
-						result = json.dumps({'type': 'SoundDetected', 'data': {'category': label_txt, 'acc': float(data[label])}, 'angle': now_angle, 'distance': now_dist})
+						result = json.dumps({'type': 'SoundDetected', 'data': {'category': label_txt, 'acc': float(data[label])}, 'pos': [now_pos[i] for i in now_pos if time.time() - now_pos[i]['last_activity'] < 0.5]})
 
 				result += '\n'
 				with send_lock:
@@ -161,7 +163,7 @@ def doa_server():
 		threading.Thread(target=doa_handle, args=(client_socket,)).start()
 
 def doa_handle(client_socket):
-	global now_angle, now_dist
+	global now_pos
 	tmp_buffer = ''
 	while True:
 		try:
@@ -179,29 +181,35 @@ def doa_handle(client_socket):
 					tmp_buffer = i
 					break
 				for data in detected:
-					target = data['src'][0]
-					x = int(float(target['x']) * 400)
-					y = int(-float(target['y']) * 400)
-					energy = int(float(target['E']) * 255)
-					if (x in range(-60, 60) and y in range(-60, 60)) or energy < 100:
-						continue
-					with doa_lock:
-						now_angle = math.degrees(math.atan2(y, x)) + 180
-						now_dist = math.sqrt(x ** 2 + y ** 2)
-		except Exception:
+					for target in data['src']:
+						if target['id'] == 0:
+							continue
+						x = int(float(target["x"]) * 400)
+						y = int(-float(target["y"]) * 400)
+						z = int(float(target["z"] - 0.5) * 400)
+						with doa_lock:
+							if target['id'] in now_pos and target['activity'] < 0.1:
+								last_activity = now_pos[target['id']]['last_activity']
+							else:
+								last_activity = time.time()
+							now_angle = math.degrees(math.atan2(y, x)) + 180
+							now_dist = math.sqrt(x ** 2 + y ** 2)
+							now_pos[target['id']] = {'x': x + 400, 'y': y + 400, 'z': z, 'activity': target['activity'], 'last_activity': last_activity, 'angle': now_angle, 'dist': now_dist}
+		except Exception as e:
+			print(traceback.format_exc())
 			break
-	server.close()
 
 def doa(tcp_socket, client_socket, reg_num):
-	global now_angle, now_dist
-	last_angle = 0
+	global now_pos
 	while True:
+		pos = []
 		with doa_lock:
-			if now_angle != last_angle:
-				last_angle = now_angle
+			for id_ in now_pos:
+				if time.time() - now_pos[id_]['last_activity'] < 0.5:
+					pos.append(now_pos[id_])
 			with send_lock:
 				try:
-					result = json.dumps({'type': 'SoundDirection', 'angle': now_angle, 'distance': now_dist})
+					result = json.dumps({'type': 'SoundDirection', 'sound': pos})
 					result += '\n'
 					client_socket.send(result.encode('UTF-8'))
 					print(result, end='')
