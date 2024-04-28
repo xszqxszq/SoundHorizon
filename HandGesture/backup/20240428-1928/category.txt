@@ -1,0 +1,13 @@
+gestures = {
+	0: "You (Left)",
+	1: "You (Right)",
+	2: "Me (Left)",
+	3: "Me (Right)",
+	4: "Teach",
+	5: "Sign Language",
+	6: "Recognize",
+	7: "Happy",
+	8: "Thanks",
+	9: "None",
+	10: "None"
+}
