@@ -15,8 +15,22 @@ import traceback
 import websockets
 import winreg
 import yaml
+import sounddevice as sd
+from keras_yamnet import params
+from keras_yamnet.yamnet import YAMNet, class_names
+from keras_yamnet.preprocessing import preprocess_input
 from netifaces import AF_INET
 from openvino.inference_engine import IECore
+
+
+p = pyaudio.PyAudio()
+stream = p.open(
+	format=pyaudio.paInt16,
+	channels=1,
+	rate=16000,
+	output=True,
+	frames_per_buffer=1024
+)
 
 async def extract_json(buf):
 	separated = buf.split('\n}')
@@ -61,44 +75,29 @@ class CLS:
 	def __init__(self):
 		self.config = config['cls']
 		self.config_audio = config['sst']['audio']
-		device = self.config['device']
-		model_path = self.config['model']
-		label_path = self.config['label']
 		with open(self.config['whitelist'], 'r') as f:
 			self.whitelist = f.read().strip().split('\n')
 		self.max_sounds = config['sst']['max_sounds']
-		self.scale = self.config_audio['scale']
 		self.fps = self.config_audio['fps']
-		self.threshold = self.config['threshold']
 
-		ie = IECore()
-		net = ie.read_network(model_path, model_path[:-4] + ".bin")
-		self.input_blob = next(iter(net.input_info))
-		self.input_shape = net.input_info[self.input_blob].input_data.shape
-		self.output_blob = next(iter(net.outputs))
-		self.exec_net = ie.load_network(network=net, device_name=device)
-		self.labels = []
-		with open(label_path, "r") as file:
-			self.labels = [line.rstrip() for line in file.readlines()]
-		self.input_size = self.input_shape[-1]
-		self.chunk = [np.zeros(self.input_shape, dtype=np.float32) for i in range(self.max_sounds)]
-		self.hop = int(self.input_size * 0.8)
-		self.overlap = int(self.input_size - self.hop)
+		self.plt_classes = [0, 76, 106, 302, 348, 353, 494]
+		self.window = 0.975
+		self.sample_rate = 16000
+		self.chunk = int(self.window * self.sample_rate)
+		self.model = YAMNet(weights='keras_yamnet/yamnet.h5')
+		self.yamnet_classes = class_names('keras_yamnet/yamnet_class_map.csv')
+		self.n_classes = len(self.plt_classes)
 
 		self.lock = asyncio.Lock()
+		self.audio = [None for i in range(self.max_sounds)]
 		self.label, self.acc = ['silence' for i in range(self.max_sounds)], [0.0 for i in range(self.max_sounds)]
 
 	def update_audio(self, raw):
 		for i in range(self.max_sounds):
+			if len(raw[i]) == 0:
+				return False
 			try:
-				input_audio = np.frombuffer(raw[i], dtype=np.int16).astype(np.float32) * 8.0
-				scale = np.std(input_audio)
-				scale = self.scale if scale < self.scale else scale
-				input_audio = (input_audio - np.mean(input_audio)) / scale
-				input_audio = np.reshape(input_audio, (1, 1, 1, self.hop))
-
-				self.chunk[i][:, :, :, :self.overlap] = self.chunk[i][:, :, :, -self.overlap:]
-				self.chunk[i][:, :, :, self.overlap:] = input_audio
+				self.audio[i] = raw[i]
 			except Exception as e:
 				print(e)
 				return False
@@ -108,28 +107,22 @@ class CLS:
 		while True:
 			async with self.sst.frame_lock:
 				raw = await self.sst.get_frame_async(loop)
-				if isinstance(raw[0], bytes):
+				if isinstance(raw[0], np.ndarray):
 					break
 			await asyncio.sleep(1 / self.fps)
 		return await loop.run_in_executor(None, self.update_audio, raw)
 
 	def infer(self):
-		label_txt, acc = ['silence' for i in range(self.max_sounds)], [0.0 for i in range(self.max_sounds)]
+		label, acc = ['silence' for i in range(self.max_sounds)], [0.0 for i in range(self.max_sounds)]
 		for i in range(self.max_sounds):
-			output = self.exec_net.infer(inputs={self.input_blob: self.chunk[i]})
-			output = output[self.output_blob]
-			for batch, data in enumerate(output):
-				label = np.argmax(data)
-				if data[label] < self.threshold:
-					label_txt[i], acc[i] = 'silence', 0.0
-					illust_idx = 99
-				else:
-					label_txt[i], acc[i] = self.labels[label], float(data[label])
-					illust_idx = label
-		for i in range(self.max_sounds):
-			if label_txt[i] not in self.whitelist:
-				label_txt[i] = 'silence'
-		return label_txt, acc
+			if not isinstance(self.audio[i], np.ndarray):
+				continue
+			data = preprocess_input(self.audio[i], self.sample_rate)
+			prediction = self.model.predict(np.expand_dims(data, 0), verbose = 0)[0]
+
+			ind = np.argmax(prediction[self.plt_classes])
+			label[i], acc[i] = self.yamnet_classes[self.plt_classes][ind], float(prediction[self.plt_classes][ind])
+		return label, acc
 
 	async def infer_async(self, loop):
 		return await loop.run_in_executor(None, lambda: self.infer())
@@ -207,18 +200,18 @@ class SST:
 						await self.update(target, ind)
 				await self.clean_inactive()
 
-
 	def submit(self, data):
 		data = np.frombuffer(data, dtype=np.int8).reshape(-1, 2)
 		for ind in range(4):
 			if not isinstance(self.waves[ind], np.ndarray):
-				self.waves[ind] = data[ind::4].flatten()
+				self.waves[ind] = data[ind::4]
 			else:
-				self.waves[ind] = np.append(self.waves[ind], data[ind::4].flatten(), axis=0)
-		if self.waves[0].shape[0] >= self.hop * 2:
+				self.waves[ind] = np.append(self.waves[ind], data[ind::4], axis=0)
+		if self.waves[0].shape[0] * 2 >= self.hop:
 			for ind in range(4):
-				self.frame[ind] = bytes(self.waves[ind].flatten()[:self.hop * 2])
+				self.frame[ind] = self.waves[ind].flatten()[:self.hop]
 				self.waves[ind] = None
+			stream.write(bytes(self.frame[0]))
 
 	async def handle_audio(self, client_socket, loop):
 		while True:
@@ -231,7 +224,9 @@ class SST:
 				await loop.run_in_executor(None, lambda: self.submit(data))
 
 	async def get_frame_async(self, loop):
-		return self.frame
+		data = self.frame
+		self.frame = [None for i in range(self.max_sounds)]
+		return data
 
 	async def listen(self, loop):
 		server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
