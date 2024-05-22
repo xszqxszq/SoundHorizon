@@ -120,7 +120,7 @@ class CLS:
 			output = output[self.output_blob]
 			for batch, data in enumerate(output):
 				label = np.argmax(data)
-				if label_txt[i] == 'Car horn' or data[label] < self.threshold:
+				if data[label] < self.threshold:
 					label_txt[i], acc[i] = 'silence', 0.0
 					illust_idx = 99
 				else:
@@ -173,7 +173,7 @@ class SST:
 			last_activity = self.pos[target['id']]['last_activity']
 		else:
 			last_activity = time.time()
-		angle, dist = (360 + math.degrees(math.atan2(y, x)) + self.offset) % 360, math.sqrt(target['x'] ** 2 + target['y'] ** 2 + target['z'] ** 2) * 100
+		angle, dist = (360 + math.degrees(math.atan2(y, x)) + self.offset) % 360, math.sqrt((x - 200) ** 2 + (y - 200) ** 2)
 		self.pos[target['id']] = {
 			'id': target['id'], 
 			'x': x + 400, 'y': y + 400, 
@@ -202,8 +202,8 @@ class SST:
 						# if target['id'] == 0 or target['tag'] != "dynamic" or target['h'] == -114514.0:
 						if target['id'] == 0:
 							continue
-						# if abs(target['z'] - 0.5) > self.max_z or abs(target['z'] - 0.5) < self.min_z:
-						# 	continue
+						if abs(target['z'] - 0.5) > self.max_z or abs(target['z'] - 0.5) < self.min_z:
+							continue
 						await self.update(target, ind)
 				await self.clean_inactive()
 
@@ -265,17 +265,16 @@ class SSL:
 	def __init__(self):
 		self.config = config['ssl']
 		self.lock = asyncio.Lock()
-		self.angle, self.dist = 0.0, 0.0
+		self.angle = 0.0
 		self.host = self.config['host']
 		self.port = self.config['port']
 		self.offset = self.config['offset']
 
 	async def update(self, target):
 		x, y, e = int(float(target['x']) * 400), int(-float(target['y']) * 400), int(float(target['E']) * 255)
-		if (x in range(-60, 60) and y in range(-60, 60)) or e < 110:
+		if (x in range(-60, 60) and y in range(-60, 60)) or e < 115:
 			return
 		self.angle = (360 + math.degrees(math.atan2(y, x)) + self.offset) % 360
-		self.dist = math.sqrt(target['x'] ** 2 + target['y'] ** 2 + target['z'] ** 2) * 100
 
 	async def handle(self, client_socket, loop):
 		buf = ''
@@ -320,7 +319,7 @@ class WS:
 			async with self.sst.lock:
 				pos = [self.sst.pos[i] for i in self.sst.pos]
 			async with self.ssl.lock:
-				angle, dist = self.ssl.angle, self.ssl.dist
+				angle = self.ssl.angle
 			async with self.cls.lock:
 				label, acc = self.cls.label, self.cls.acc
 			async with self.lock:
@@ -342,13 +341,12 @@ class WS:
 						break
 				pos[target]['category'] = label2
 
-			result = json.dumps({'sound': pos, 'angle': angle, 'dist': dist})
+			result = json.dumps({'sound': pos, 'angle': angle})
 
 			try:
 				await websocket.send(result)
 			except Exception as e:
 				print("Websocket client connection closed.")
-				await self.toggle_fan(True)
 				break
 			await asyncio.sleep(1 / self.fps)
 
@@ -364,33 +362,19 @@ class WS:
 		async with self.lock:
 			self.trusted_label.append((data['category'], time.time()))
 
-	async def toggle_fan(self, status):
-		# async with aiohttp.ClientSession() as session:
-		# 	fan_ip = (await (await session.get('http://swc.otmdb.cn/ip')).json())['data']['raspberry_fan']
-		# 	await session.get('{}/fan?status={}'.format(fan_ip, status))
-		pass
-
 	async def handle(self, websocket, path):
 		if path == '/category':
 			await self.category(websocket)
 		else:
 			print("Client connected.")
-			stop_fan_task = asyncio.create_task(self.toggle_fan(False))
 			sst_doa_task = asyncio.create_task(self.doa(websocket))
 
-			await asyncio.gather(stop_fan_task, sst_doa_task)
+			await asyncio.gather(sst_doa_task)
 
 	async def announce(self):
 		ip = ''
 		while True:
 			try:
-				# try:
-				# 	names = get_connection_name_from_guid()
-				# 	iface_name = names[[i for i in names if i.startswith('以太网')][0]]
-				# 	ip = netifaces.ifaddresses(iface_name)[AF_INET][0]['addr']
-				# except Exception:
-				# 	ip = netifaces.ifaddresses(get_connection_name_from_guid()[config['network']['interface']])[AF_INET][0]['addr']
-				# break
 				ip = netifaces.ifaddresses(get_connection_name_from_guid()[config['network']['interface']])[AF_INET][0]['addr']
 				break
 			except Exception as e:

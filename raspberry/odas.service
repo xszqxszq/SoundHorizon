@@ -1,0 +1,16 @@
+[Unit]
+Description=ODAS service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+Group=root
+ExecStart=/bin/bash /root/server/start.sh
+WorkingDirectory=/root/server/
+Restart=always
+RestartSec=2
+TimeoutStopSec=1
+
+[Install]
+WantedBy=multi-user.target

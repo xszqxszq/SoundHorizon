@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWC Demo</title>
+    <link href="https://cdn.staticfile.org/twitter-bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.staticfile.org/jquery/2.1.1/jquery.min.js"></script>
+    <script src="https://cdn.staticfile.org/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
+</head>
+<body class="bg-light">
+
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6 text-center">
+                <button class="btn btn-warning btn-lg mb-3" onclick="playSound('horn')">汽车鸣笛</button>
+                <audio id="horn" src="https://otmdb.cn/swc/horn.mp3"></audio>
+                <button class="btn btn-success btn-lg mb-3" onclick="playSound('cat')">猫叫</button>
+                <audio id="cat" src="https://otmdb.cn/swc/cat.mp3"></audio>
+                <button class="btn btn-success btn-lg mb-3" onclick="playSound('bird')">鸟叫</button>
+                <audio id="bird" src="https://otmdb.cn/swc/bird.mp3"></audio>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var currentAudio = null;
+
+        function playSound(audioId) {
+            if (currentAudio && !currentAudio.paused) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            }
+
+            currentAudio = document.getElementById(audioId);
+            currentAudio.addEventListener('play', sendRequest);
+            currentAudio.play();
+        }
+        function sendRequest() {
+            var audioId = currentAudio.id;
+            fetch('http://swc.otmdb.cn/sound?type=' + audioId, {
+                method: 'GET'
+            }).then(response => {
+                console.log('Request sent to ' + audioId);
+            }).catch(error => {
+                console.error('Error sending request to ' + audioId + ':', error);
+            });
+
+            currentAudio.removeEventListener('play', sendRequest);
+        }
+    </script>
+</body>
+</html>

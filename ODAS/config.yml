@@ -1,0 +1,32 @@
+cls:
+  device: "CPU"
+  model: "public/aclnet-int8/aclnet_des_53_int8.xml"
+  label: "data/aclnet_53cl.txt"
+  whitelist: "data/whitelist.txt"
+  threshold: 0.85
+sst:
+  host: "0.0.0.0"
+  port: 11450
+  max_sounds: 4
+  min_z: 0.03
+  max_z: 0.4
+  activity:
+    ttl: 0.5
+    threshold: 0.5
+  audio:
+    port: 11453
+    hop: 12800
+    scale: 4000
+    fps: 120
+  offset: 90
+ssl:
+  host: "0.0.0.0"
+  port: 11452
+  offset: 90
+ws:
+  host: "0.0.0.0"
+  port: 11451
+  fps: 15
+  ttl: 5
+network:
+  interface: WLAN
