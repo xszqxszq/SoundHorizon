@@ -22,16 +22,6 @@ from keras_yamnet.preprocessing import preprocess_input
 from netifaces import AF_INET
 from openvino.inference_engine import IECore
 
-
-p = pyaudio.PyAudio()
-stream = p.open(
-	format=pyaudio.paInt16,
-	channels=1,
-	rate=16000,
-	output=True,
-	frames_per_buffer=1024
-)
-
 async def extract_json(buf):
 	separated = buf.split('\n}')
 	detected = []
@@ -207,11 +197,10 @@ class SST:
 				self.waves[ind] = data[ind::4]
 			else:
 				self.waves[ind] = np.append(self.waves[ind], data[ind::4], axis=0)
-		if self.waves[0].shape[0] * 2 >= self.hop:
+		if self.waves[0].shape[0] >= self.hop:
 			for ind in range(4):
-				self.frame[ind] = self.waves[ind].flatten()[:self.hop]
+				self.frame[ind] = self.waves[ind][:self.hop]
 				self.waves[ind] = None
-			stream.write(bytes(self.frame[0]))
 
 	async def handle_audio(self, client_socket, loop):
 		while True:
@@ -224,9 +213,7 @@ class SST:
 				await loop.run_in_executor(None, lambda: self.submit(data))
 
 	async def get_frame_async(self, loop):
-		data = self.frame
-		self.frame = [None for i in range(self.max_sounds)]
-		return data
+		return self.frame
 
 	async def listen(self, loop):
 		server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
