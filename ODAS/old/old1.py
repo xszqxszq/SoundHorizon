@@ -219,8 +219,8 @@ def doa(tcp_socket, client_socket, reg_num):
 
 class ASRClient():
 	def __init__(self):
-		self.app_id = "fb5a7a05"
-		self.api_key = "d9de6a3c9059f1b8fb73a162d5e5689f"
+		self.app_id = ""
+		self.api_key = ""
 		base_url = "ws://rtasr.xfyun.cn/v1/ws"
 		ts = str(int(time.time()))
 		tt = (self.app_id + ts).encode('utf-8')
