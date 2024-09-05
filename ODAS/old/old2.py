@@ -142,7 +142,6 @@ async def handle_doa(websocket):
 		try:
 			with sst_lock:
 				result = json.dumps({'type': 'SoundDirection', 'sound': [now_pos[i] for i in now_pos]})
-			#print(result)
 			await websocket.send(result)
 		except websockets.exceptions.ConnectionClosedOK:
 			print("Client connection closed.")
@@ -196,7 +195,6 @@ def handle_cls(websocket):
 					result = json.dumps({'type': 'SoundDetected', 'data': {'category': label_txt, 'acc': float(data[label])}, 'sound': [now_pos[i] for i in now_pos]})
 			try:
 				asyncio.run(websocket.send(result))
-				#print(result)
 			except websockets.exceptions.ConnectionClosedOK:
 				print("Client connection closed.")
 				break
